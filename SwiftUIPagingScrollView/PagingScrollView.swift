@@ -4,17 +4,16 @@
 //
 //  Created by myf on 27/08/2019.
 //  Copyright © 2019 Pavel Zak. All rights reserved.
-//
+//  
 
 import SwiftUI
 
-struct PagingScrollView: View {
-    let items: [AnyView]
-
-    init<A: View>(activePageIndex:Binding<Int>, itemCount: Int, pageWidth:CGFloat, tileWidth:CGFloat, tilePadding: CGFloat, @ViewBuilder content: () -> A) {
-        let views = content()
-        self.items = [AnyView(views)]
-        
+struct PagingScrollView<Content: View>: View {
+    @Binding var activePageIndex : Int
+    let content: Content
+    
+    init(activePageIndex:Binding<Int>, itemCount: Int, pageWidth:CGFloat, tileWidth:CGFloat, tilePadding: CGFloat, @ViewBuilder content: () -> Content) {
+        self.content = content()
         self._activePageIndex = activePageIndex
         
         self.pageWidth = pageWidth
@@ -27,9 +26,6 @@ struct PagingScrollView: View {
         self.leadingOffset = tileRemain+tilePadding
         self.stackOffset = contentWidth/2 - pageWidth/2 - tilePadding/2
     }
-    
-    /// index of current page 0..N-1
-    @Binding var activePageIndex : Int
     
     /// pageWidth==frameWidth used to properly compute offsets
     let pageWidth: CGFloat
@@ -58,6 +54,9 @@ struct PagingScrollView: View {
     /// some damping factor to reduce liveness
     private let scrollDampingFactor: CGFloat = 0.66
     
+    /// state of  user dragging interaction
+    @State var dragging: Bool = false
+    
     /// current offset of all items
     @State var currentScrollOffset: CGFloat = 0
     
@@ -83,7 +82,7 @@ struct PagingScrollView: View {
     }
     
     /// current scroll offset applied on items
-    func computeCurrentScrollOffset()->CGFloat {
+    func computeCurrentScrollOffset() -> CGFloat {
         return self.offsetForPageIndex(self.activePageIndex) + self.dragOffset
     }
     
@@ -96,13 +95,9 @@ struct PagingScrollView: View {
     var body: some View {
         GeometryReader { outerGeometry in
             HStack(alignment: .center, spacing: self.tilePadding)  {
-                /// building items into HStack
-                ForEach(0..<self.items.count) { index in
-                    
-                        self.items[index]
-                            .frame(width: self.tileWidth)
-                    
-                }
+                
+                self.content.frame(width: self.tileWidth)
+                
             }
             .onAppear {
                 self.currentScrollOffset = self.offsetForPageIndex(self.activePageIndex)
@@ -110,21 +105,22 @@ struct PagingScrollView: View {
             .offset(x: self.stackOffset, y: 0)
             .background(Color.black.opacity(0.00001)) // hack - this allows gesture recognizing even when background is transparent
             .frame(width: self.contentWidth)
-            .offset(x: self.currentScrollOffset, y: 0)
+            .offset(x: self.dragging ? self.currentScrollOffset : self.offsetForPageIndex(self.activePageIndex), y: 0)
+            .animation(self.dragging ? .none : .interpolatingSpring(mass: 0.1, stiffness: 20, damping: 1.5, initialVelocity: 0))
             .simultaneousGesture( DragGesture(minimumDistance: 1, coordinateSpace: .local) // can be changed to simultaneous gesture to work with buttons
                 .onChanged { value in
+                    self.dragging = true
                     self.dragOffset = value.translation.width
                     self.currentScrollOffset = self.computeCurrentScrollOffset()
                 }
                 .onEnded { value in
+                    self.dragging = false
                     // compute nearest index
-                    let velocityDiff = (value.predictedEndTranslation.width - self.dragOffset)*self.scrollDampingFactor
+                    let velocityDiff = (value.predictedEndTranslation.width - self.dragOffset) * self.scrollDampingFactor
                     let newPageIndex = self.indexPageForOffset(self.currentScrollOffset+velocityDiff)
                     self.dragOffset = 0
-                    withAnimation(.interpolatingSpring(mass: 0.1, stiffness: 20, damping: 1.5, initialVelocity: 0)){
-                        self.activePageIndex = newPageIndex
-                        self.currentScrollOffset = self.computeCurrentScrollOffset()
-                    }
+                    self.activePageIndex = newPageIndex
+                    self.currentScrollOffset = self.computeCurrentScrollOffset()
                 }
             )
         }
